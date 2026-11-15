@@ -1,0 +1,102 @@
+name: Build PureAIO
+
+on:
+  push:
+    branches: [ "**" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. MSBuild ───────────────────────────────────────────────────────────
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      # ── 3. Grab protobuf-net + ILMerge from NuGet (no manual copy needed) ──
+      - name: Install NuGet
+        uses: NuGet/setup-nuget@v2
+
+      - name: Restore / fetch dependencies
+        shell: pwsh
+        run: |
+          # Create References folder
+          New-Item -ItemType Directory -Force -Path References | Out-Null
+
+          # Download protobuf-net 2.4.6 (net40 build, matches .NET 4.7.2)
+          nuget install protobuf-net -Version 2.4.6 -OutputDirectory packages -NonInteractive
+          $pbnet = Get-ChildItem -Path packages -Recurse -Filter "protobuf-net.dll" |
+                   Where-Object { $_.FullName -match "net40|net45|net472" } |
+                   Select-Object -First 1
+          if (-not $pbnet) {
+              # fallback: take any build
+              $pbnet = Get-ChildItem -Path packages -Recurse -Filter "protobuf-net.dll" |
+                       Select-Object -First 1
+          }
+          Copy-Item $pbnet.FullName -Destination "References\protobuf-net.dll" -Force
+          Write-Host "protobuf-net: $($pbnet.FullName)"
+
+          # Download ILMerge
+          nuget install ILMerge -Version 3.0.41 -OutputDirectory packages -NonInteractive
+          $ilmerge = Get-ChildItem -Path packages -Recurse -Filter "ILMerge.exe" |
+                     Select-Object -First 1
+          Copy-Item $ilmerge.FullName -Destination "References\ILMerge.exe" -Force
+          Write-Host "ILMerge: $($ilmerge.FullName)"
+
+      # ── 4. PluginSDK — must be supplied by Sam ───────────────────────────────
+      # The PluginSDK.dll is not public. Two ways to provide it:
+      #   A) Add it as a GitHub Actions secret (base64-encoded) named PLUGIN_SDK_B64
+      #   B) Commit it directly to the repo under References/PluginSDK.dll
+      # This step handles option A. If the secret is absent and the file already
+      # exists (option B) the step is a no-op.
+      - name: Inject PluginSDK from secret
+        shell: pwsh
+        env:
+          PLUGIN_SDK_B64: ${{ secrets.PLUGIN_SDK_B64 }}
+        run: |
+          $dest = "References\PluginSDK.dll"
+          if ($env:PLUGIN_SDK_B64) {
+              [System.IO.File]::WriteAllBytes($dest,
+                  [System.Convert]::FromBase64String($env:PLUGIN_SDK_B64))
+              Write-Host "PluginSDK injected from secret."
+          } elseif (Test-Path $dest) {
+              Write-Host "PluginSDK already present in repo."
+          } else {
+              Write-Error "PluginSDK.dll not found. Add PLUGIN_SDK_B64 secret or commit the file."
+              exit 1
+          }
+
+      # ── 5. Build ─────────────────────────────────────────────────────────────
+      - name: Build Release
+        run: msbuild PureAIO.sln /p:Configuration=Release /p:Platform="Any CPU" /v:minimal
+
+      # ── 6. Verify outputs ────────────────────────────────────────────────────
+      - name: List outputs
+        shell: pwsh
+        run: |
+          Get-ChildItem -Recurse -Filter "*.dll" |
+            Where-Object { $_.FullName -match "bin\\Release" } |
+            Select-Object FullName, Length |
+            Format-Table -AutoSize
+
+      # ── 7. Upload artifacts ──────────────────────────────────────────────────
+      - name: Upload server plugin
+        uses: actions/upload-artifact@v4
+        with:
+          name: PureAIO-server
+          path: PureAIO/bin/Release/PureAIO.dll
+
+      - name: Upload client dll (merged)
+        uses: actions/upload-artifact@v4
+        with:
+          name: PureAIO-client
+          # ILMerge target outputs merged.dll; fall back to raw if merge failed
+          path: |
+            PureAIO.Client/bin/Release/PureAIO.Client.merged.dll
+            PureAIO.Client/bin/Release/PureAIO.Client.dll
+          if-no-files-found: error

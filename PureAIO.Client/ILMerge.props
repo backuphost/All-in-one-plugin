@@ -1,0 +1,6 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <ILMergeTargetPlatform>v4,C:\Windows\Microsoft.NET\Framework\v4.0.30319</ILMergeTargetPlatform>
+    <ILMergeExtraArguments>/internalize /allowDup</ILMergeExtraArguments>
+  </PropertyGroup>
+</Project>

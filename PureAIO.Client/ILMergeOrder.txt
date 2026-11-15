@@ -1,0 +1,2 @@
+PureAIO.Client.dll
+protobuf-net.dll
