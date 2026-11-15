@@ -64,7 +64,7 @@
 
   <!-- ILMerge: merge protobuf-net into output dll after build -->
   <Target Name="ILMergeAssemblies" AfterTargets="Build" Condition="'$(Configuration)'=='Release'">
-    <Exec Command="&quot;$(SolutionDir)References\ILMerge.exe&quot; /target:library /out:&quot;$(ILMergeOutputPath)&quot; &quot;$(OutputPath)$(AssemblyName).dll&quot; &quot;$(SolutionDir)References\protobuf-net.dll&quot;" />
+    <Exec Command="&quot;$(SolutionDir)References\ILRepack.exe&quot; /target:library /out:&quot;$(ILMergeOutputPath)&quot; &quot;$(OutputPath)$(AssemblyName).dll&quot; &quot;$(SolutionDir)References\protobuf-net.dll&quot;" />
   </Target>
 
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

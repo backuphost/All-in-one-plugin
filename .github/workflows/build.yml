@@ -41,12 +41,12 @@ jobs:
           Copy-Item $pbnet.FullName -Destination "References\protobuf-net.dll" -Force
           Write-Host "protobuf-net: $($pbnet.FullName)"
 
-          # Download ILMerge
-          nuget install ILMerge -Version 3.0.41 -OutputDirectory packages -NonInteractive
-          $ilmerge = Get-ChildItem -Path packages -Recurse -Filter "ILMerge.exe" |
-                     Select-Object -First 1
-          Copy-Item $ilmerge.FullName -Destination "References\ILMerge.exe" -Force
-          Write-Host "ILMerge: $($ilmerge.FullName)"
+          # Download ILRepack (ILMerge 3.x has a System.Compiler runtime dep that breaks on windows-latest)
+          nuget install ILRepack -Version 2.0.21 -OutputDirectory packages -NonInteractive
+          $ilrepack = Get-ChildItem -Path packages -Recurse -Filter "ILRepack.exe" |
+                      Select-Object -First 1
+          Copy-Item $ilrepack.FullName -Destination "References\ILRepack.exe" -Force
+          Write-Host "ILRepack: $($ilrepack.FullName)"
 
       # ── 4. PluginSDK — must be supplied by Sam ───────────────────────────────
       # The PluginSDK.dll is not public. Two ways to provide it:
