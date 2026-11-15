@@ -51,7 +51,7 @@ namespace PureAIO
             }
             catch (Exception ex)
             {
-                AppendLog(rtbLog, $"[ERR] Send failed: {ex.Message}", Color.Red);
+                // send error — no log panel in context, swallow silently
             }
         }
 
@@ -139,8 +139,8 @@ namespace PureAIO
             foreach (var c in r.Cookies)
             {
                 var item = new ListViewItem(c.Username ?? "?");
-                item.SubItems.Add(c.UserId ?? "");
-                item.SubItems.Add(c.Robux?.ToString() ?? "");
+                item.SubItems.Add(c.UserId.ToString());
+                item.SubItems.Add(c.Robux.ToString());
                 item.SubItems.Add(c.IsPremium ? "✓" : "");
                 item.SubItems.Add(c.TwoStepEnabled ? "✓" : "");
                 item.SubItems.Add(c.Country ?? "");
