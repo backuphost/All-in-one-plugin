@@ -71,9 +71,24 @@ jobs:
               exit 1
           }
 
-      # ── 5. Build ─────────────────────────────────────────────────────────────
+      # ── 5. Verify SDK present before build ───────────────────────────────────
+      - name: Verify References
+        shell: pwsh
+        run: |
+          $files = @("References\PluginSDK.dll","References\protobuf-net.dll")
+          foreach ($f in $files) {
+            if (Test-Path $f) {
+              $bytes = (Get-Item $f).Length
+              Write-Host "OK  $f  ($bytes bytes)"
+            } else {
+              Write-Error "MISSING: $f"
+              exit 1
+            }
+          }
+
+      # ── 6. Build ─────────────────────────────────────────────────────────────
       - name: Build Release
-        run: msbuild PureAIO.sln /p:Configuration=Release /p:Platform="Any CPU" /v:minimal
+        run: msbuild PureAIO.sln /p:Configuration=Release /p:Platform="Any CPU" /v:normal /p:ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch=None
 
       # ── 6. Verify outputs ────────────────────────────────────────────────────
       - name: List outputs
