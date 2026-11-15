@@ -13,6 +13,9 @@ namespace PureAIO
         // ── controls ──────────────────────────────────────────────────────────
         private System.Windows.Forms.TabControl             tabMain;
 
+        // Connection status (top-level, sits outside tabs)
+        private System.Windows.Forms.Label                  lblConnectionStatus;
+
         // AuthBait tab
         private System.Windows.Forms.TabPage                tabAuthBait;
         private System.Windows.Forms.Button                 btnStartAuthBait;
@@ -77,12 +80,27 @@ namespace PureAIO
 
             // ── Root form ─────────────────────────────────────────────────────
             this.Text            = "PureAIO v2";
-            this.Size            = new System.Drawing.Size(900, 620);
-            this.MinimumSize     = new System.Drawing.Size(800, 540);
+            this.Size            = new System.Drawing.Size(900, 644);
+            this.MinimumSize     = new System.Drawing.Size(800, 564);
             this.BackColor       = BgDark;
             this.ForeColor       = TextPrimary;
             this.Font            = new System.Drawing.Font("Segoe UI", 9f);
             this.StartPosition   = System.Windows.Forms.FormStartPosition.CenterScreen;
+
+            // ── Connection status bar ─────────────────────────────────────────
+            lblConnectionStatus = new System.Windows.Forms.Label
+            {
+                Text      = "○ Not connected",
+                Font      = new System.Drawing.Font("Segoe UI", 8.5f, System.Drawing.FontStyle.Bold),
+                ForeColor = AccentRed,
+                AutoSize  = false,
+                Dock      = System.Windows.Forms.DockStyle.Top,
+                Height    = 24,
+                TextAlign = System.Drawing.ContentAlignment.MiddleRight,
+                Padding   = new System.Windows.Forms.Padding(0, 0, 10, 0),
+                BackColor = System.Drawing.Color.FromArgb(22, 22, 28),
+            };
+            this.Controls.Add(lblConnectionStatus);
 
             // ── Tab control ───────────────────────────────────────────────────
             tabMain = new System.Windows.Forms.TabControl

